@@ -1,24 +1,34 @@
-# Starflight Warp Atlas
+# Starflight Atlas
 
-Create a warp-speed 3D real, accurate starfield for offline use on a mobile device. Use the Yale Star Map, etc. It can be steered with tap and touch controls, with adjustable speed and density. Include a boost mode, subtle motion blur or streaking stars, and on-screen controls that do not clutter the view. Make it immersive and buttery smooth at 60fps.  Use Capacitor, Gradle, etc for APK. Use github workflow to push. Include Install App button inside app for device install.
+A warp-speed 3D flight through real stars, built for phones and fully offline.
 
-This project was built with [Lovable](https://lovable.dev).
+## Features
+- ~109,000 real stars in true 3D positions, from the Yale Bright Star Catalogue merged with the HYG database (Hipparcos distances).
+- Real star colours (B-V index) and magnitude-based brightness.
+- Drag to steer, tap to centre, hold **Boost** for a warp burst with streaking stars.
+- Speed and star-density sliders; controls fade out to keep the view clear.
+- Works offline and installs to your home screen via the in-app **Install App** button.
+- Android APK built automatically with Capacitor and Gradle.
 
-## Build with Lovable
-
-Continue developing this project in the [Lovable editor](https://lovable.dev/projects/3e5109e9-81fe-4148-88f9-5ae02e4ca9e2).
-
-- **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: every change made in Lovable is committed straight to this repository.
-- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
-
-## Development
-
-Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
-
+## Run locally
 ```sh
-git clone <this-repository-url>
-cd <repository-name>
-npm i
+npm install
 npm run dev
 ```
+
+## Builds
+| Command | Output |
+| --- | --- |
+| `npm run build:mobile` | Static site in `dist-mobile/` (used for GitHub Pages and the APK) |
+| `npm test` | Flight-sim tests |
+
+## GitHub Pages
+`.github/workflows/pages.yml` builds the static site and deploys it on every push to `main`.
+One-time setup: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+
+## Android APK
+`.github/workflows/android.yml` builds a debug APK on every push to `main`.
+Download it from the **Actions** tab (artifact `starflight-atlas-apk`) and sideload it.
+
+## Star data
+`scripts/build-stars.py` downloads the catalogues, cross-matches them and writes `public/stars.bin`. The app needs no network at runtime.
