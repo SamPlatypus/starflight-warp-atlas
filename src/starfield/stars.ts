@@ -7,7 +7,7 @@ export interface StarData {
 }
 
 /** Loads the bundled catalogue (see scripts/build-stars.py for the format). */
-export async function loadStars(url = "/stars.bin"): Promise<StarData> {
+export async function loadStars(url = `${import.meta.env.BASE_URL}stars.bin`): Promise<StarData> {
   const buf = await (await fetch(url)).arrayBuffer();
   const head = new Uint32Array(buf, 0, 2);
   const count = head[0] ?? 0;
