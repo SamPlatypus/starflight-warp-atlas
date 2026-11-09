@@ -28,3 +28,9 @@ use the editor.
   own key and store it in Secrets.
 - **Secrets.** Lovable manages them. Do not put secret values in the repo.
 <!-- LOVABLE:END -->
+
+## Project rules
+- Starfield flight rules live in `src/starfield/sim.ts` (no React/three); the scene only draws them — keeps tuning testable.
+- Star data is prebuilt into `public/stars.bin` by `scripts/build-stars.py` (HYG v3.8 incl. Yale BSC) — no runtime network.
+- Android app uses a separate static build (`vite.mobile.config.ts`, `mobile/`) because Capacitor needs plain files; the GitHub workflow generates the android project and APK.
+- Service worker registers only via `src/lib/pwa.ts` guards (never in preview/dev/Capacitor).
