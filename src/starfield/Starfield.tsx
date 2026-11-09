@@ -100,13 +100,13 @@ function Scene({ shared, stars, onReady }: { shared: Shared; stars: StarData; on
     far.geo.instanceCount = Math.round(FAR_COUNT * (0.3 + 0.7 * shared.density));
     const mag = densityToMagLimit(shared.density);
     for (const m of [real.mat, far.mat]) {
-      const u = m.uniforms;
-      u.uCam.value.copy(shared.cam);
-      u.uVel.value.copy(fwd);
-      u.uStreak.value = STREAK * (1 + 2.5 * f.boost);
-      u.uRes.value.set(size.width * dpr, size.height * dpr);
-      u.uPx.value = 1.3 * dpr;
-      u.uMagLimit.value = mag;
+      const u = m.uniforms as Record<string, { value: any }>;
+      u["uCam"]!.value.copy(shared.cam);
+      u["uVel"]!.value.copy(fwd);
+      u["uStreak"]!.value = STREAK * (1 + 2.5 * f.boost);
+      u["uRes"]!.value.set(size.width * dpr, size.height * dpr);
+      u["uPx"]!.value = 1.3 * dpr;
+      u["uMagLimit"]!.value = mag;
     }
 
     // Adaptive resolution: drop pixel ratio if sustained under ~45fps.
@@ -147,7 +147,7 @@ export function Starfield() {
   const [uiVisible, setUiVisible] = useState(true);
   const [boostOn, setBoostOn] = useState(false);
   const hudRef = useRef<HTMLDivElement>(null);
-  const idle = useRef<ReturnType<typeof setTimeout>>();
+  const idle = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const shared = useRef<Shared>({
     flight: createFlight(sliderToSpeed(0.45)),
     boosting: false,

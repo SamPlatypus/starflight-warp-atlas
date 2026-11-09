@@ -6,7 +6,7 @@ function refused(): boolean {
   if (window.self !== window.top) return true;
   if (new URLSearchParams(location.search).get("sw") === "off") return true;
   const h = location.hostname.toLowerCase();
-  const label = h.split(".")[0];
+  const label = h.split(".")[0] ?? "";
   for (const d of [".lovable.app", ".gpt-eng.com", ".gptengineer.run"]) {
     if (h.endsWith(d) && (PREVIEW_LABEL.test(label) || /^project--.+-dev$/.test(label))) return true;
   }
