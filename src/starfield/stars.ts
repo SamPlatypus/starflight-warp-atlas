@@ -10,22 +10,22 @@ export interface StarData {
 export async function loadStars(url = "/stars.bin"): Promise<StarData> {
   const buf = await (await fetch(url)).arrayBuffer();
   const head = new Uint32Array(buf, 0, 2);
-  const count = head[0];
+  const count = head[0] ?? 0;
   const raw = new Float32Array(buf, 8, count * 7);
   const pos = new Float32Array(count * 3);
   const abs = new Float32Array(count);
   const col = new Float32Array(count * 3);
   for (let i = 0; i < count; i++) {
     const o = i * 7;
-    pos[i * 3] = raw[o];
-    pos[i * 3 + 1] = raw[o + 1];
-    pos[i * 3 + 2] = raw[o + 2];
-    abs[i] = raw[o + 3];
-    col[i * 3] = raw[o + 4];
-    col[i * 3 + 1] = raw[o + 5];
-    col[i * 3 + 2] = raw[o + 6];
+    pos[i * 3] = raw[o]!;
+    pos[i * 3 + 1] = raw[o + 1]!;
+    pos[i * 3 + 2] = raw[o + 2]!;
+    abs[i] = raw[o + 3]!;
+    col[i * 3] = raw[o + 4]!;
+    col[i * 3 + 1] = raw[o + 5]!;
+    col[i * 3 + 2] = raw[o + 6]!;
   }
-  return { count, yaleCount: head[1], pos, abs, col };
+  return { count, yaleCount: head[1] ?? 0, pos, abs, col };
 }
 
 /** Procedural far field that wraps around the camera so deep-space travel never empties. */
@@ -43,7 +43,7 @@ export function makeFarField(n: number, box: number): StarData {
     for (let k = 0; k < 3; k++) pos[i * 3 + k] = (Math.random() - 0.5) * box;
     abs[i] = 1 + Math.random() * 6;
     const t = tints[Math.floor(Math.random() * tints.length)];
-    col.set(t, i * 3);
+    col.set(t!, i * 3);
   }
   return { count: n, yaleCount: 0, pos, abs, col };
 }
