@@ -20,18 +20,12 @@ jobs:
       - name: Add Android platform
         run: '[ -d android ] || npx cap add android'
       - run: npx cap sync android
-      - name: Install the SDK packages this project needs
+      - name: Accept Android SDK licenses
         run: |
-          set -euo pipefail
           SDKM=$(find "$ANDROID_HOME/cmdline-tools" -maxdepth 3 -type f -name sdkmanager | sort -r | head -1)
           echo "using sdkmanager: $SDKM"
-          SDK=$(grep -oE 'compileSdkVersion[[:space:]]*=[[:space:]]*[0-9]+' android/variables.gradle | grep -oE '[0-9]+' | head -1)
-          BT=$(grep -oE 'buildToolsVersion[[:space:]]*=?[[:space:]]*"?[0-9][0-9.]*"?' android/variables.gradle | grep -oE '[0-9][0-9.]+' | head -1 || true)
-          echo "compileSdk=$SDK buildTools=${BT:-auto}"
-          (yes 2>/dev/null | "$SDKM" --sdk_root="$ANDROID_HOME" --licenses >/dev/null 2>&1) || true
-          pkgs=(platform-tools "platforms;android-$SDK")
-          if [ -n "$BT" ]; then pkgs+=("build-tools;$BT"); fi
-          "$SDKM" --sdk_root="$ANDROID_HOME" "${pkgs[@]}" </dev/null
+          yes 2>/dev/null | "$SDKM" --sdk_root="$ANDROID_HOME" --licenses >/dev/null 2>&1 || true
+          "$SDKM" --sdk_root="$ANDROID_HOME" --list_installed 2>/dev/null | head -40 || true
       - name: Gradle assembleDebug
         working-directory: android
         run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon
