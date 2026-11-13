@@ -1,7 +1,7 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { ChevronRight, Gauge, Rocket, Settings2, Sparkles, X } from "lucide-react";
+import { ChevronRight, Crosshair, Gauge, Navigation, Rocket, Settings2, Sparkles, X } from "lucide-react";
 import { starFragment, starVertex } from "./shaders";
 import { loadStars, makeFarField, type StarData } from "./stars";
 import {
@@ -15,7 +15,9 @@ import {
   type Flight,
 } from "./sim";
 import { InstallButton } from "./InstallButton";
-import { placeCompass } from "./compass";
+import { placeCompass, type CompassPlacement } from "./compass";
+import { createAutopilot, disengage, engage, pickNearest, slerpFactor, stepAutopilot, type ApPhase, type Autopilot } from "./autopilot";
+import { LANDMARKS, toScene, type Landmark } from "./namedStars";
 
 const FAR_BOX = 40;
 const FAR_COUNT = 5000;
@@ -27,7 +29,17 @@ interface Shared {
   boosting: boolean;
   cam: THREE.Vector3;
   density: number;
+  camera: THREE.PerspectiveCamera | null;
+  target: Landmark | null;
+  targetPos: THREE.Vector3;
+  ap: Autopilot;
+  onPhase: (p: ApPhase) => void;
+  onArrive: () => void;
 }
+
+type ApStatus = ApPhase | "arrived";
+const LANDMARK_POS = LANDMARKS.map((s) => new THREE.Vector3(...toScene(s)));
+const ORIGIN = new THREE.Vector3();
 
 interface CompassEls {
   root: HTMLElement | null;
@@ -35,7 +47,23 @@ interface CompassEls {
   tag: HTMLElement | null;
 }
 
-const fmtLy = (ly: number) => (ly < 10 ? ly.toFixed(1) : Math.round(ly).toLocaleString());
+const fmtLy = (ly: number) => (ly < 1 ? ly.toFixed(2) : ly < 10 ? ly.toFixed(1) : Math.round(ly).toLocaleString());
+
+/** Position a HUD marker (reticle or edge chevron) from a placement. */
+function writeMarker(m: CompassEls, at: CompassPlacement, w: number, h: number) {
+  const el = m.root;
+  if (!el) return;
+  el.dataset["mode"] = at.mode;
+  if (at.mode === "hidden") return;
+  el.style.transform = `translate3d(${at.x.toFixed(1)}px, ${at.y.toFixed(1)}px, 0)`;
+  if (at.mode === "edge" && m.arrow) m.arrow.style.transform = `rotate(${at.angle.toFixed(3)}rad)`;
+  if (m.tag) {
+    const mid = Math.abs(at.x - w / 2) < w / 6;
+    const tx = mid ? "-50%" : at.x > w / 2 ? "calc(-100% - 22px)" : "22px";
+    const ty = at.y > h / 2 ? "calc(-100% - 22px)" : "22px";
+    m.tag.style.transform = `translate(${tx}, ${ty})`;
+  }
+}
 
 function makeMaterial(wrap: boolean) {
   return new THREE.ShaderMaterial({
@@ -69,7 +97,7 @@ function makeGeometry(d: StarData) {
   return g;
 }
 
-function Scene({ shared, stars, compass, onReady }: { shared: Shared; stars: StarData; compass: CompassEls; onReady: () => void }) {
+function Scene({ shared, stars, compass, marker, onReady }: { shared: Shared; stars: StarData; compass: CompassEls; marker: CompassEls; onReady: () => void }) {
   const { camera, gl, size, setDpr } = useThree();
   const real = useMemo(() => ({ geo: makeGeometry(stars), mat: makeMaterial(false) }), [stars]);
   const far = useMemo(() => ({ geo: makeGeometry(makeFarField(FAR_COUNT, FAR_BOX)), mat: makeMaterial(true) }), []);
@@ -78,6 +106,10 @@ function Scene({ shared, stars, compass, onReady }: { shared: Shared; stars: Sta
   const euler = useMemo(() => new THREE.Euler(), []);
   const solView = useMemo(() => new THREE.Vector3(), []);
   const solNdc = useMemo(() => new THREE.Vector3(), []);
+  const toTarget = useMemo(() => new THREE.Vector3(), []);
+  const up = useMemo(() => new THREE.Vector3(), []);
+  const look = useMemo(() => new THREE.Matrix4(), []);
+  const goal = useMemo(() => new THREE.Quaternion(), []);
   const perf = useRef({ t: 0, frames: 0, dpr: Math.min(window.devicePixelRatio, 2), ready: false });
 
   useEffect(() => () => {
@@ -90,15 +122,37 @@ function Scene({ shared, stars, compass, onReady }: { shared: Shared; stars: Sta
   useFrame((_, rawDt) => {
     const dt = Math.min(rawDt, 0.05);
     const f = shared.flight;
-    stepFlight(f, dt, shared.boosting);
+    const pc = camera as THREE.PerspectiveCamera;
+    shared.camera = pc;
+    const ap = shared.ap;
+    const piloting = ap.phase !== "off" && shared.target !== null;
+    stepFlight(f, dt, shared.boosting && !piloting);
 
-    euler.set(f.pitchRate * dt, f.yawRate * dt, 0);
-    dq.setFromEuler(euler);
-    camera.quaternion.multiply(dq);
-    fwd.set(0, 0, -1).applyQuaternion(camera.quaternion).multiplyScalar(f.speed);
+    if (piloting) {
+      // Autopilot: slerp heading toward the target, keeping the current "up" to avoid rolling.
+      f.yawRate = 0;
+      f.pitchRate = 0;
+      toTarget.copy(shared.targetPos).sub(shared.cam);
+      up.set(0, 1, 0).applyQuaternion(camera.quaternion);
+      look.lookAt(ORIGIN, toTarget, up);
+      goal.setFromRotationMatrix(look);
+      camera.quaternion.slerp(goal, slerpFactor(dt));
+    } else {
+      euler.set(f.pitchRate * dt, f.yawRate * dt, 0);
+      dq.setFromEuler(euler);
+      camera.quaternion.multiply(dq);
+    }
+    fwd.set(0, 0, -1).applyQuaternion(camera.quaternion);
+    if (piloting) {
+      const prev = ap.phase;
+      const res = stepAutopilot(ap, fwd.angleTo(toTarget), toTarget.length(), f.speed, dt);
+      f.speed = ap.speed;
+      if (res === "arrived") shared.onArrive();
+      else if (ap.phase !== prev) shared.onPhase(ap.phase);
+    }
+    fwd.multiplyScalar(f.speed);
     shared.cam.addScaledVector(fwd, dt);
 
-    const pc = camera as THREE.PerspectiveCamera;
     const fov = FOV + 14 * f.boost;
     if (Math.abs(pc.fov - fov) > 0.01) {
       pc.fov = fov;
@@ -106,22 +160,19 @@ function Scene({ shared, stars, compass, onReady }: { shared: Shared; stars: Sta
     }
 
     // Sol compass: Sol sits at world origin, so relative to the camera it is -cam.
-    const el = compass.root;
-    if (el) {
-      pc.updateMatrixWorld();
+    pc.updateMatrixWorld();
+    if (compass.root) {
       solView.copy(shared.cam).negate().applyMatrix4(pc.matrixWorldInverse);
       solNdc.copy(shared.cam).negate().project(pc);
-      const at = placeCompass(solView, solNdc, size.width, size.height);
-      el.dataset["mode"] = at.mode;
-      if (at.mode !== "hidden") {
-        el.style.transform = `translate3d(${at.x.toFixed(1)}px, ${at.y.toFixed(1)}px, 0)`;
-        if (at.mode === "edge" && compass.arrow) compass.arrow.style.transform = `rotate(${at.angle.toFixed(3)}rad)`;
-        if (compass.tag) {
-          const mid = Math.abs(at.x - size.width / 2) < size.width / 6;
-          const tx = mid ? "-50%" : at.x > size.width / 2 ? "calc(-100% - 22px)" : "22px";
-          const ty = at.y > size.height / 2 ? "calc(-100% - 22px)" : "22px";
-          compass.tag.style.transform = `translate(${tx}, ${ty})`;
-        }
+      writeMarker(compass, placeCompass(solView, solNdc, size.width, size.height), size.width, size.height);
+    }
+    // Target reticle: same placement rules as the compass, relative to the locked landmark.
+    if (marker.root) {
+      if (!shared.target) marker.root.dataset["mode"] = "hidden";
+      else {
+        solView.copy(shared.targetPos).sub(shared.cam).applyMatrix4(pc.matrixWorldInverse);
+        solNdc.copy(shared.targetPos).sub(shared.cam).project(pc);
+        writeMarker(marker, placeCompass(solView, solNdc, size.width, size.height), size.width, size.height);
       }
     }
 
@@ -178,6 +229,10 @@ export function Starfield() {
   const [uiVisible, setUiVisible] = useState(true);
   const [boostOn, setBoostOn] = useState(false);
   const [solTag, setSolTag] = useState(false);
+  const [target, setTarget] = useState<Landmark | null>(null);
+  const [apStatus, setApStatus] = useState<ApStatus>("off");
+  const targetDistRef = useRef<HTMLSpanElement>(null);
+  const marker = useRef<CompassEls>({ root: null, arrow: null, tag: null }).current;
   const hudRef = useRef<HTMLDivElement>(null);
   const compass = useRef<CompassEls>({ root: null, arrow: null, tag: null }).current;
   const idle = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -186,6 +241,15 @@ export function Starfield() {
     boosting: false,
     cam: new THREE.Vector3(),
     density: 0.5,
+    camera: null,
+    target: null,
+    targetPos: new THREE.Vector3(),
+    ap: createAutopilot(),
+    onPhase: (p) => setApStatus(p),
+    onArrive: () => {
+      setApStatus("arrived");
+      setSpeedT(0); // cut throttle to minimum
+    },
   }).current;
   const drag = useRef<{ id: number; x: number; y: number; t: number; moved: boolean } | null>(null);
 
@@ -233,6 +297,9 @@ export function Starfield() {
       const ly = shared.cam.length() * PC_TO_LY;
       el.textContent = `${(f.speed * PC_TO_LY).toFixed(f.speed < 3 ? 1 : 0)} ly/s · ${fmtLy(ly)} ly from Sol`;
       if (compass.tag) compass.tag.textContent = `Sol · ${fmtLy(ly)} ly`;
+      if (shared.target && targetDistRef.current) {
+        targetDistRef.current.textContent = `${fmtLy(shared.targetPos.distanceTo(shared.cam) * PC_TO_LY)} ly`;
+      }
     }, 200);
     return () => clearInterval(id);
   }, [shared, compass]);
@@ -240,6 +307,47 @@ export function Starfield() {
   const setBoost = (on: boolean) => {
     shared.boosting = on;
     setBoostOn(on);
+  };
+
+  const cancelAutopilot = () => {
+    if (shared.ap.phase === "off") return;
+    disengage(shared.ap);
+    setApStatus("off");
+  };
+  const selectTarget = (i: number) => {
+    const s = LANDMARKS[i];
+    if (!s) return;
+    if (shared.target !== s) cancelAutopilot();
+    shared.target = s;
+    shared.targetPos.copy(LANDMARK_POS[i]!);
+    setTarget(s);
+    if (shared.ap.phase === "off") setApStatus("off");
+  };
+  const clearTarget = () => {
+    cancelAutopilot();
+    shared.target = null;
+    setTarget(null);
+  };
+  const flyHere = () => {
+    if (!shared.target) return;
+    engage(shared.ap, shared.flight.speed);
+    setApStatus("align");
+    poke();
+  };
+  /** Landmark index within the tap radius of a screen point, using the live camera. */
+  const pickAt = (x: number, y: number, w: number, h: number) => {
+    const pc = shared.camera;
+    if (!pc) return -1;
+    pc.updateMatrixWorld();
+    const v = new THREE.Vector3();
+    const pts = LANDMARK_POS.map((p) => {
+      v.copy(p).sub(shared.cam).applyMatrix4(pc.matrixWorldInverse);
+      if (v.z >= 0) return null;
+      v.copy(p).sub(shared.cam).project(pc);
+      if (Math.abs(v.x) > 1 || Math.abs(v.y) > 1) return null;
+      return { x: ((v.x + 1) / 2) * w, y: ((1 - v.y) / 2) * h };
+    });
+    return pickNearest(pts, x, y);
   };
 
   const onDown = (e: React.PointerEvent) => {
@@ -252,7 +360,10 @@ export function Starfield() {
     if (!d || d.id !== e.pointerId) return;
     const dx = e.clientX - d.x;
     const dy = e.clientY - d.y;
-    if (Math.hypot(dx, dy) > 10) d.moved = true;
+    if (!d.moved && Math.hypot(dx, dy) > 10) {
+      d.moved = true;
+      cancelAutopilot(); // steering by hand takes back control
+    }
     const short = Math.min(window.innerWidth, window.innerHeight);
     shared.flight.steerX = dragToSteer(dx, short);
     shared.flight.steerY = dragToSteer(dy, short);
@@ -263,7 +374,12 @@ export function Starfield() {
     shared.flight.steerX = 0;
     shared.flight.steerY = 0;
     if (!d.moved && performance.now() - d.t < 300) {
-      if (uiVisible && !panel) setUiVisible(false);
+      const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const hit = pickAt(e.clientX - box.left, e.clientY - box.top, box.width, box.height);
+      if (hit >= 0) {
+        selectTarget(hit);
+        poke();
+      } else if (uiVisible && !panel) setUiVisible(false);
       else poke();
     }
     drag.current = null;
@@ -282,7 +398,7 @@ export function Starfield() {
             camera={{ fov: FOV, near: 0.0001, far: 10, position: [0, 0, 0] }}
             onCreated={({ gl }) => gl.setClearColor("#020308")}
           >
-            <Scene shared={shared} stars={stars} compass={compass} onReady={() => setReady(true)} />
+            <Scene shared={shared} stars={stars} compass={compass} marker={marker} onReady={() => setReady(true)} />
           </Canvas>
         )}
       </div>
@@ -312,6 +428,50 @@ export function Starfield() {
         </span>
         <span ref={(n) => void (compass.tag = n)} className={`hud-compass-tag hud-text ${solTag ? "" : "hidden"}`} />
       </button>
+
+      {/* Target reticle: stays up while a landmark is locked; taps pass through to the sky. */}
+      <div ref={(n) => void (marker.root = n)} data-mode="hidden" aria-hidden className="hud-target">
+        <span className="hud-target-ring" />
+        <span ref={(n) => void (marker.arrow = n)} className="hud-target-arrow">
+          <ChevronRight className="size-5" strokeWidth={2.5} />
+        </span>
+      </div>
+
+      {target && (
+        <div
+          role="dialog"
+          aria-label={`Target ${target.name}`}
+          className={`hud-card absolute left-1/2 top-[calc(max(env(safe-area-inset-top),12px)+26px)] w-[min(320px,calc(100vw-40px))] -translate-x-1/2 p-3.5 transition-opacity duration-700 ${fade}`}
+        >
+          <div className="flex items-start gap-3">
+            <Crosshair className="mt-0.5 size-4 shrink-0 text-primary" />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-base font-semibold text-foreground">{target.name}</div>
+              <div className="hud-text truncate text-[11px] text-muted-foreground">
+                {target.bayer} · {target.spectral}
+              </div>
+              <div className="hud-text mt-1 text-[11px] text-muted-foreground">
+                <span ref={targetDistRef} className="text-foreground">…</span> away
+                {apStatus === "align" && " · aligning"}
+                {apStatus === "warp" && " · warp engaged"}
+                {apStatus === "arrived" && " · arrived"}
+              </div>
+            </div>
+            <button aria-label="Dismiss target" onClick={clearTarget} className="hud-chip size-8 shrink-0">
+              <X className="size-3.5" />
+            </button>
+          </div>
+          {apStatus === "align" || apStatus === "warp" ? (
+            <button onClick={cancelAutopilot} className="hud-fly hud-fly-on mt-3">
+              <X className="size-4" /> Disengage
+            </button>
+          ) : (
+            <button onClick={flyHere} className="hud-fly mt-3">
+              <Navigation className="size-4" /> Fly Here
+            </button>
+          )}
+        </div>
+      )}
 
       <div className={`pointer-events-none absolute inset-x-0 top-0 flex justify-center pt-[max(env(safe-area-inset-top),12px)] transition-opacity duration-700 ${fade}`}>
         <div ref={hudRef} className="hud-text text-[11px] tracking-widest text-muted-foreground" />
@@ -354,7 +514,7 @@ export function Starfield() {
             <input type="range" min={0} max={1} step={0.001} value={density} onChange={(e) => setDensity(+e.target.value)} className="hud-range" />
           </label>
           <p className="hud-text text-[10px] leading-relaxed text-muted-foreground">
-            Drag to steer · hold rocket to boost · tap to hide controls. Real positions from the Yale Bright Star & HYG catalogues.
+            Drag to steer · hold rocket to boost · tap a bright star to target it · tap empty sky to hide controls. Real positions from the Yale Bright Star & HYG catalogues.
           </p>
           <InstallButton />
         </div>
