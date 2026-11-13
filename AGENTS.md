@@ -31,6 +31,7 @@ use the editor.
 
 ## Project rules
 - Starfield flight rules live in `src/starfield/sim.ts` (no React/three); the scene only draws them — keeps tuning testable.
+- Sol compass placement math lives in `src/starfield/compass.ts` (pure, tested); the scene writes its DOM position per frame, never via React state.
 - Star data is prebuilt into `public/stars.bin` by `scripts/build-stars.py` (HYG v3.8 incl. Yale BSC) — no runtime network.
 - Android app uses a separate static build (`vite.mobile.config.ts`, `mobile/`) because Capacitor needs plain files; the GitHub workflow generates the android project and APK.
 - Service worker registers only via `src/lib/pwa.ts` guards (never in preview/dev/Capacitor).

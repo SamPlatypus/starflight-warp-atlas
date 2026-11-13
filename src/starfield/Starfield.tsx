@@ -117,8 +117,9 @@ function Scene({ shared, stars, compass, onReady }: { shared: Shared; stars: Sta
         el.style.transform = `translate3d(${at.x.toFixed(1)}px, ${at.y.toFixed(1)}px, 0)`;
         if (at.mode === "edge" && compass.arrow) compass.arrow.style.transform = `rotate(${at.angle.toFixed(3)}rad)`;
         if (compass.tag) {
-          const tx = at.x > size.width / 2 ? "calc(-100% - 22px)" : "22px";
-          const ty = at.y > size.height / 2 ? "calc(-100% - 14px)" : "14px";
+          const mid = Math.abs(at.x - size.width / 2) < size.width / 6;
+          const tx = mid ? "-50%" : at.x > size.width / 2 ? "calc(-100% - 22px)" : "22px";
+          const ty = at.y > size.height / 2 ? "calc(-100% - 22px)" : "22px";
           compass.tag.style.transform = `translate(${tx}, ${ty})`;
         }
       }
