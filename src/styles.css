@@ -147,4 +147,26 @@
     border-radius: var(--radius-lg); padding: 0.6rem; font-size: 0.8rem; font-weight: 600;
     color: var(--color-accent-foreground); background: var(--color-accent);
   }
+  .hud-compass {
+    position: absolute; left: 0; top: 0; width: 2.25rem; height: 2.25rem; margin: -1.125rem 0 0 -1.125rem;
+    display: flex; align-items: center; justify-content: center; color: var(--color-accent);
+    touch-action: none; will-change: transform;
+  }
+  .hud-compass[data-mode="hidden"] { visibility: hidden; }
+  .hud-compass-dot {
+    display: none; width: 0.875rem; height: 0.875rem; border-radius: 9999px;
+    border: 1.5px solid oklch(0.8 0.14 70 / 75%); box-shadow: 0 0 10px oklch(0.8 0.14 70 / 35%);
+  }
+  .hud-compass-dot::after {
+    content: ""; display: block; width: 3px; height: 3px; margin: 3px auto 0; border-radius: 9999px;
+    background: var(--color-accent);
+  }
+  .hud-compass[data-mode="dot"] .hud-compass-dot { display: block; }
+  .hud-compass-arrow { display: none; opacity: 0.85; filter: drop-shadow(0 0 6px oklch(0.8 0.14 70 / 50%)); }
+  .hud-compass[data-mode="edge"] .hud-compass-arrow { display: block; }
+  .hud-compass-tag {
+    position: absolute; left: 50%; top: 50%; white-space: nowrap; padding: 0.2rem 0.5rem; font-size: 10px;
+    border-radius: 9999px; color: var(--color-accent); background: oklch(0.12 0.015 260 / 70%);
+    border: 1px solid oklch(0.8 0.14 70 / 35%); backdrop-filter: blur(10px); pointer-events: none;
+  }
 }

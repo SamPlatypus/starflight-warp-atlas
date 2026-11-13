@@ -1,7 +1,7 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { Gauge, Rocket, Settings2, Sparkles, X } from "lucide-react";
+import { ChevronRight, Gauge, Rocket, Settings2, Sparkles, X } from "lucide-react";
 import { starFragment, starVertex } from "./shaders";
 import { loadStars, makeFarField, type StarData } from "./stars";
 import {
@@ -15,6 +15,7 @@ import {
   type Flight,
 } from "./sim";
 import { InstallButton } from "./InstallButton";
+import { placeCompass } from "./compass";
 
 const FAR_BOX = 40;
 const FAR_COUNT = 5000;
@@ -27,6 +28,14 @@ interface Shared {
   cam: THREE.Vector3;
   density: number;
 }
+
+interface CompassEls {
+  root: HTMLElement | null;
+  arrow: HTMLElement | null;
+  tag: HTMLElement | null;
+}
+
+const fmtLy = (ly: number) => (ly < 10 ? ly.toFixed(1) : Math.round(ly).toLocaleString());
 
 function makeMaterial(wrap: boolean) {
   return new THREE.ShaderMaterial({
@@ -60,13 +69,15 @@ function makeGeometry(d: StarData) {
   return g;
 }
 
-function Scene({ shared, stars, onReady }: { shared: Shared; stars: StarData; onReady: () => void }) {
+function Scene({ shared, stars, compass, onReady }: { shared: Shared; stars: StarData; compass: CompassEls; onReady: () => void }) {
   const { camera, gl, size, setDpr } = useThree();
   const real = useMemo(() => ({ geo: makeGeometry(stars), mat: makeMaterial(false) }), [stars]);
   const far = useMemo(() => ({ geo: makeGeometry(makeFarField(FAR_COUNT, FAR_BOX)), mat: makeMaterial(true) }), []);
   const fwd = useMemo(() => new THREE.Vector3(), []);
   const dq = useMemo(() => new THREE.Quaternion(), []);
   const euler = useMemo(() => new THREE.Euler(), []);
+  const solView = useMemo(() => new THREE.Vector3(), []);
+  const solNdc = useMemo(() => new THREE.Vector3(), []);
   const perf = useRef({ t: 0, frames: 0, dpr: Math.min(window.devicePixelRatio, 2), ready: false });
 
   useEffect(() => () => {
@@ -92,6 +103,26 @@ function Scene({ shared, stars, onReady }: { shared: Shared; stars: StarData; on
     if (Math.abs(pc.fov - fov) > 0.01) {
       pc.fov = fov;
       pc.updateProjectionMatrix();
+    }
+
+    // Sol compass: Sol sits at world origin, so relative to the camera it is -cam.
+    const el = compass.root;
+    if (el) {
+      pc.updateMatrixWorld();
+      solView.copy(shared.cam).negate().applyMatrix4(pc.matrixWorldInverse);
+      solNdc.copy(shared.cam).negate().project(pc);
+      const at = placeCompass(solView, solNdc, size.width, size.height);
+      el.dataset["mode"] = at.mode;
+      if (at.mode !== "hidden") {
+        el.style.transform = `translate3d(${at.x.toFixed(1)}px, ${at.y.toFixed(1)}px, 0)`;
+        if (at.mode === "edge" && compass.arrow) compass.arrow.style.transform = `rotate(${at.angle.toFixed(3)}rad)`;
+        if (compass.tag) {
+          const mid = Math.abs(at.x - size.width / 2) < size.width / 6;
+          const tx = mid ? "-50%" : at.x > size.width / 2 ? "calc(-100% - 22px)" : "22px";
+          const ty = at.y > size.height / 2 ? "calc(-100% - 22px)" : "22px";
+          compass.tag.style.transform = `translate(${tx}, ${ty})`;
+        }
+      }
     }
 
     const dpr = gl.getPixelRatio();
@@ -146,7 +177,9 @@ export function Starfield() {
   const [panel, setPanel] = useState(false);
   const [uiVisible, setUiVisible] = useState(true);
   const [boostOn, setBoostOn] = useState(false);
+  const [solTag, setSolTag] = useState(false);
   const hudRef = useRef<HTMLDivElement>(null);
+  const compass = useRef<CompassEls>({ root: null, arrow: null, tag: null }).current;
   const idle = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const shared = useRef<Shared>({
     flight: createFlight(sliderToSpeed(0.45)),
@@ -198,10 +231,11 @@ export function Starfield() {
       if (!el) return;
       const f = shared.flight;
       const ly = shared.cam.length() * PC_TO_LY;
-      el.textContent = `${(f.speed * PC_TO_LY).toFixed(f.speed < 3 ? 1 : 0)} ly/s · ${ly < 10 ? ly.toFixed(1) : Math.round(ly).toLocaleString()} ly from Sol`;
+      el.textContent = `${(f.speed * PC_TO_LY).toFixed(f.speed < 3 ? 1 : 0)} ly/s · ${fmtLy(ly)} ly from Sol`;
+      if (compass.tag) compass.tag.textContent = `Sol · ${fmtLy(ly)} ly`;
     }, 200);
     return () => clearInterval(id);
-  }, [shared]);
+  }, [shared, compass]);
 
   const setBoost = (on: boolean) => {
     shared.boosting = on;
@@ -235,7 +269,8 @@ export function Starfield() {
     drag.current = null;
   };
 
-  const fade = uiVisible || panel ? "opacity-100" : "pointer-events-none opacity-0";
+  const live = uiVisible || panel;
+  const fade = live ? "opacity-100" : "pointer-events-none opacity-0";
 
   return (
     <div className="fixed inset-0 touch-none select-none overflow-hidden bg-background" data-scene-ready={ready ? "" : undefined}>
@@ -247,7 +282,7 @@ export function Starfield() {
             camera={{ fov: FOV, near: 0.0001, far: 10, position: [0, 0, 0] }}
             onCreated={({ gl }) => gl.setClearColor("#020308")}
           >
-            <Scene shared={shared} stars={stars} onReady={() => setReady(true)} />
+            <Scene shared={shared} stars={stars} compass={compass} onReady={() => setReady(true)} />
           </Canvas>
         )}
       </div>
@@ -258,12 +293,32 @@ export function Starfield() {
         </div>
       )}
 
+      {/* Sol compass: placed every frame by the scene; sits under the controls so buttons win taps. */}
+      <button
+        ref={(n) => void (compass.root = n)}
+        data-mode="hidden"
+        aria-label="Sol compass"
+        aria-pressed={solTag}
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={() => {
+          setSolTag((t) => !t);
+          poke();
+        }}
+        className={`hud-compass transition-opacity duration-700 ${fade}`}
+      >
+        <span className="hud-compass-dot" />
+        <span ref={(n) => void (compass.arrow = n)} className="hud-compass-arrow">
+          <ChevronRight className="size-5" strokeWidth={2.5} />
+        </span>
+        <span ref={(n) => void (compass.tag = n)} className={`hud-compass-tag hud-text ${solTag ? "" : "hidden"}`} />
+      </button>
+
       <div className={`pointer-events-none absolute inset-x-0 top-0 flex justify-center pt-[max(env(safe-area-inset-top),12px)] transition-opacity duration-700 ${fade}`}>
         <div ref={hudRef} className="hud-text text-[11px] tracking-widest text-muted-foreground" />
       </div>
 
-      <div className={`absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 px-5 pb-[max(env(safe-area-inset-bottom),20px)] transition-opacity duration-700 ${fade}`}>
-        <button aria-label="Settings" onClick={() => setPanel((p) => !p)} className="hud-chip size-11">
+      <div className={`pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 px-5 pb-[max(env(safe-area-inset-bottom),20px)] transition-opacity duration-700 ${live ? "opacity-100" : "opacity-0"}`}>
+        <button aria-label="Settings" onClick={() => setPanel((p) => !p)} className={`hud-chip size-11 ${live ? "pointer-events-auto" : ""}`}>
           {panel ? <X className="size-4" /> : <Settings2 className="size-4" />}
         </button>
 
@@ -278,7 +333,7 @@ export function Starfield() {
           onPointerUp={() => setBoost(false)}
           onPointerCancel={() => setBoost(false)}
           onContextMenu={(e) => e.preventDefault()}
-          className={`hud-boost ${boostOn ? "hud-boost-on" : ""}`}
+          className={`hud-boost ${boostOn ? "hud-boost-on" : ""} ${live ? "pointer-events-auto" : ""}`}
         >
           <Rocket className="size-6" />
         </button>
