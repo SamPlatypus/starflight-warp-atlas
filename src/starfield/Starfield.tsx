@@ -268,7 +268,8 @@ export function Starfield() {
     drag.current = null;
   };
 
-  const fade = uiVisible || panel ? "opacity-100" : "pointer-events-none opacity-0";
+  const live = uiVisible || panel;
+  const fade = live ? "opacity-100" : "pointer-events-none opacity-0";
 
   return (
     <div className="fixed inset-0 touch-none select-none overflow-hidden bg-background" data-scene-ready={ready ? "" : undefined}>
@@ -315,8 +316,8 @@ export function Starfield() {
         <div ref={hudRef} className="hud-text text-[11px] tracking-widest text-muted-foreground" />
       </div>
 
-      <div className={`absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 px-5 pb-[max(env(safe-area-inset-bottom),20px)] transition-opacity duration-700 ${fade}`}>
-        <button aria-label="Settings" onClick={() => setPanel((p) => !p)} className="hud-chip size-11">
+      <div className={`pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 px-5 pb-[max(env(safe-area-inset-bottom),20px)] transition-opacity duration-700 ${live ? "opacity-100" : "opacity-0"}`}>
+        <button aria-label="Settings" onClick={() => setPanel((p) => !p)} className={`hud-chip size-11 ${live ? "pointer-events-auto" : ""}`}>
           {panel ? <X className="size-4" /> : <Settings2 className="size-4" />}
         </button>
 
@@ -331,7 +332,7 @@ export function Starfield() {
           onPointerUp={() => setBoost(false)}
           onPointerCancel={() => setBoost(false)}
           onContextMenu={(e) => e.preventDefault()}
-          className={`hud-boost ${boostOn ? "hud-boost-on" : ""}`}
+          className={`hud-boost ${boostOn ? "hud-boost-on" : ""} ${live ? "pointer-events-auto" : ""}`}
         >
           <Rocket className="size-6" />
         </button>
