@@ -39,7 +39,7 @@ describe("fly here autopilot", () => {
     ap.phase = "warp";
     let dist = 400;
     let peak = 0;
-    for (let i = 0; i < 20000 && ap.phase !== "off"; i++) {
+    for (let i = 0; i < 20000 && (ap.phase as string) !== "off"; i++) {
       stepAutopilot(ap, 0, dist, 10, 0.05);
       peak = Math.max(peak, ap.speed);
       dist -= ap.speed * 0.05;
